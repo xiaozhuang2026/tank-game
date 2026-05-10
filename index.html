@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>坦克大战 - Tank Battle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: 'Arial', sans-serif;
+  overflow: hidden;
+}
+#gameContainer {
+  position: relative;
+}
+canvas {
+  border: 3px solid #e94560;
+  border-radius: 8px;
+  display: block;
+}
+#startScreen, #gameOverScreen, #winScreen {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: rgba(0,0,0,0.85);
+  color: white;
+  z-index: 10;
+  border-radius: 8px;
+}
+#startScreen h1, #winScreen h1 {
+  font-size: 48px;
+  color: #e94560;
+  margin-bottom: 20px;
+  text-shadow: 0 0 20px #e94560;
+}
+#gameOverScreen h1 {
+  font-size: 48px;
+  color: #ff6b6b;
+  margin-bottom: 20px;
+  text-shadow: 0 0 20px #ff6b6b;
+}
+.btn {
+  padding: 15px 40px;
+  font-size: 22px;
+  background: #e94560;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 20px;
+  transition: all 0.3s;
+}
+.btn:hover {
+  background: #c81e45;
+  transform: scale(1.05);
+}
+.instructions {
+  color: #aaa;
+  margin-top: 30px;
+  text-align: center;
+  line-height: 1.8;
+  font-size: 16px;
+}
+#hud {
+  position: absolute;
+  top: 10px; left: 10px; right: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 5;
+  pointer-events: none;
+}
+.hud-item {
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  text-shadow: 0 0 10px rgba(0,0,0,0.8);
+}
+#bossBar {
+  position: absolute;
+  bottom: 15px; left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  z-index: 5;
+  pointer-events: none;
+  display: none;
+}
+#bossBarLabel {
+  color: #ff6b6b;
+  font-size: 16px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 4px;
+  text-shadow: 0 0 10px rgba(0,0,0,0.8);
+}
+#bossBarOuter {
+  width: 100%;
+  height: 20px;
+  background: #333;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid #ff6b6b;
+}
+#bossBarInner {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #ff6b6b, #e94560);
+  border-radius: 10px;
+  transition: width 0.3s;
+}
+</style>
+</head>
+<body>
+
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="900" height="600"></canvas>
+  
+  <div id="hud">
+    <div class="hud-item" id="scoreDisplay">分数: 0</div>
+    <div class="hud-item" id="waveDisplay">波次: 1</div>
+    <div class="hud-item" id="hpDisplay">❤️❤️❤️❤️❤️❤️❤️❤️</div>
+  </div>
+  
+  <div id="bossBar">
+    <div id="bossBarLabel">👾 BOSS</div>
+    <div id="bossBarOuter"><div id="bossBarInner"></div></div>
+  </div>
+  
+  <div id="startScreen">
+    <h1>🎮 坦克大战</h1>
+    <p style="color:#ccc; font-size:20px;">消灭敌人，击败Boss！</p>
+    <button class="btn" onclick="startGame()">开始游戏</button>
+    <div class="instructions">
+      WASD / 方向键 - 移动<br>
+      鼠标瞄准 - 点击射击<br>
+      击败所有敌人后进入Boss战！
+    </div>
+  </div>
+  
+  <div id="gameOverScreen" style="display:none;">
+    <h1>💀 游戏结束</h1>
+    <p style="color:#ccc; font-size:24px;" id="finalScore">最终分数: 0</p>
+    <button class="btn" onclick="startGame()">再来一次</button>
+  </div>
+  
+  <div id="winScreen" style="display:none;">
+    <h1>🎉 胜利！</h1>
+    <p style="color:#ccc; font-size:24px;" id="winScore">最终分数: 0</p>
+    <button class="btn" onclick="startGame()">再玩一次</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let game = null;
+let animId = null;
+
+const keys = {};
+let mouseX = 0, mouseY = 0;
+let mouseDown = false;
+let shootCooldown = 0;
+
+document.addEventListener('keydown', e => { keys[e.key] = true; e.preventDefault(); });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mouseX = e.clientX - r.left;
+  mouseY = e.clientY - r.top;
+});
+canvas.addEventListener('mousedown', e => { mouseDown = true; });
+canvas.addEventListener('mouseup', e => { mouseDown = false; });
+
+class Tank {
+  constructor(x, y, color, isPlayer) {
+    this.x = x;
+    this.y = y;
+    this.w = 40;
+    this.h = 30;
+    this.color = color;
+    this.isPlayer = isPlayer;
+    this.angle = 0;
+    this.turretAngle = 0;
+    this.speed = isPlayer ? 4 : 1.2;
+    this.hp = isPlayer ? 8 : 2;
+    this.invincible = isPlayer ? 120 : 0; // 2 seconds invincibility at start
+    this.maxHp = this.hp;
+    this.shootTimer = 0;
+    this.bullets = [];
+    this.alive = true;
+    this.flash = 0;
+  }
+  
+  draw() {
+    if (!this.alive) return;
+    // Blink when invincible
+    if (this.invincible > 0 && Math.floor(this.invincible / 4) % 2 === 0) return;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    
+    // Body
+    let bodyColor = this.flash > 0 ? '#fff' : this.color;
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+    
+    // Tracks
+    ctx.fillStyle = '#555';
+    ctx.fillRect(-this.w/2 - 2, -this.h/2 - 4, this.w + 4, 6);
+    ctx.fillRect(-this.w/2 - 2, this.h/2 - 2, this.w + 4, 6);
+    
+    // Turret (follows mouse for player, follows target for enemy)
+    ctx.rotate(this.turretAngle);
+    ctx.fillStyle = this.isPlayer ? '#4ecdc4' : '#ff6b6b';
+    ctx.fillRect(-5, -4, 30, 8);
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.fillStyle = this.isPlayer ? '#45b7aa' : '#e94560';
+    ctx.fill();
+    
+    ctx.restore();
+    
+    if (this.flash > 0) this.flash--;
+  }
+  
+  update() {
+    if (!this.alive) return;
+    if (this.shootTimer > 0) this.shootTimer--;
+    if (this.invincible > 0) this.invincible--;
+  }
+}
+
+class Enemy extends Tank {
+  constructor(x, y, type) {
+    super(x, y, '#e94560', false);
+    this.type = type; // 'normal' or 'boss'
+    if (type === 'boss') {
+      this.w = 70;
+      this.h = 50;
+      this.hp = 50;
+      this.maxHp = 50;
+      this.speed = 1;
+      this.color = '#8b0000';
+    }
+    this.moveAngle = Math.random() * Math.PI * 2;
+    this.moveTimer = 0;
+    this.targetX = 0;
+    this.targetY = 0;
+  }
+  
+  update(player, W, H) {
+    super.update();
+    if (!this.alive) return;
+    
+    if (this.type === 'boss') {
+      // Boss AI - circle around center, shoot at player
+      this.moveTimer++;
+      let cx = W / 2, cy = H / 2;
+      let radius = 180;
+      let a = this.moveTimer * 0.01;
+      this.targetX = cx + Math.cos(a) * radius;
+      this.targetY = cy + Math.sin(a) * radius;
+      
+      let dx = this.targetX - this.x;
+      let dy = this.targetY - this.y;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > 5) {
+        this.x += (dx/dist) * this.speed;
+        this.y += (dy/dist) * this.speed;
+      }
+      
+      // Turret aims at player
+      this.turretAngle = Math.atan2(player.y - this.y, player.x - this.x);
+      
+      // Boss shoots every 20 frames
+      if (this.shootTimer <= 0) {
+        this.shoot(player);
+        this.shootTimer = 20;
+      }
+    } else {
+      // Normal enemy - random movement, shoot at player
+      this.moveTimer++;
+      if (this.moveTimer > 90) {
+        this.moveAngle = Math.random() * Math.PI * 2;
+        this.moveTimer = 0;
+      }
+      
+      this.x += Math.cos(this.moveAngle) * this.speed;
+      this.y += Math.sin(this.moveAngle) * this.speed;
+      
+      // Bounce off walls
+      if (this.x < 30 || this.x > W - 30) this.moveAngle = Math.PI - this.moveAngle;
+      if (this.y < 30 || this.y > H - 30) this.moveAngle = -this.moveAngle;
+      this.x = Math.max(30, Math.min(W - 30, this.x));
+      this.y = Math.max(30, Math.min(H - 30, this.y));
+      
+      // Turret aims at player
+      this.turretAngle = Math.atan2(player.y - this.y, player.x - this.x);
+      
+      // Shoot every 90 frames
+      if (this.shootTimer <= 0) {
+        this.shoot(player);
+        this.shootTimer = 90 + Math.random() * 60;
+      }
+    }
+  }
+  
+  shoot(player) {
+    let a = Math.atan2(player.y - this.y, player.x - this.x);
+    let speed = this.type === 'boss' ? 3.5 : 2;
+    let dmg = this.type === 'boss' ? 1 : 1;
+    game.enemyBullets.push({
+      x: this.x + Math.cos(this.turretAngle) * 30,
+      y: this.y + Math.sin(this.turretAngle) * 30,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      r: this.type === 'boss' ? 5 : 3,
+      dmg: dmg,
+      color: '#ff4444'
+    });
+    
+    // Boss shoots spread
+    if (this.type === 'boss' && game.wave >= 3) {
+      for (let i = -1; i <= 1; i += 2) {
+        let sa = a + i * 0.3;
+        game.enemyBullets.push({
+          x: this.x + Math.cos(this.turretAngle) * 30,
+          y: this.y + Math.sin(this.turretAngle) * 30,
+          vx: Math.cos(sa) * speed,
+          vy: Math.sin(sa) * speed,
+          r: 5, dmg: 1, color: '#ff4444'
+        });
+      }
+    }
+  }
+}
+
+class Bullet {
+  constructor(x, y, vx, vy) {
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.r = 4;
+    this.alive = true;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+  draw() {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#4ecdc4';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r + 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(78, 205, 196, 0.3)';
+    ctx.fill();
+  }
+}
+
+class Particle {
+  constructor(x, y, color) {
+    this.x = x; this.y = y;
+    this.vx = (Math.random() - 0.5) * 8;
+    this.vy = (Math.random() - 0.5) * 8;
+    this.life = 20 + Math.random() * 15;
+    this.maxLife = this.life;
+    this.color = color;
+    this.r = 2 + Math.random() * 4;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.96;
+    this.vy *= 0.96;
+    this.life--;
+  }
+  draw() {
+    let alpha = this.life / this.maxLife;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r * alpha, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function startGame() {
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('gameOverScreen').style.display = 'none';
+  document.getElementById('winScreen').style.display = 'none';
+  
+  if (animId) cancelAnimationFrame(animId);
+  
+  game = {
+    player: new Tank(450, 500, '#4ecdc4', true),
+    enemies: [],
+    playerBullets: [],
+    enemyBullets: [],
+    particles: [],
+    score: 0,
+    wave: 0,
+    waveTimer: 0,
+    bossSpawned: false,
+    boss: null,
+    state: 'playing', // playing, gameover, win
+    stars: []
+  };
+  
+  // Generate background stars
+  for (let i = 0; i < 80; i++) {
+    game.stars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 2,
+      a: Math.random()
+    });
+  }
+  
+  spawnWave();
+  gameLoop();
+}
+
+function spawnWave() {
+  game.wave++;
+  
+  if (game.wave <= 3) {
+    // Normal waves
+    let count = game.wave * 2 + 1; // 3, 5, 7 enemies
+    for (let i = 0; i < count; i++) {
+      let ex, ey;
+      do {
+        ex = 80 + Math.random() * (canvas.width - 160);
+        ey = 50 + Math.random() * 200;
+      } while (Math.hypot(ex - game.player.x, ey - game.player.y) < 150);
+      
+      let e = new Enemy(ex, ey, 'normal');
+      game.enemies.push(e);
+    }
+  } else {
+    // Boss wave!
+    let boss = new Enemy(canvas.width / 2, 150, 'boss');
+    boss.hp = 50;
+    boss.maxHp = 50;
+    game.boss = boss;
+    game.enemies.push(boss);
+    game.bossSpawned = true;
+    document.getElementById('bossBar').style.display = 'block';
+  }
+  
+  document.getElementById('waveDisplay').textContent = '波次: ' + game.wave;
+}
+
+function playerShoot() {
+  if (shootCooldown > 0) return;
+  let p = game.player;
+  let a = p.turretAngle;
+  let tipX = p.x + Math.cos(a) * 30;
+  let tipY = p.y + Math.sin(a) * 30;
+  game.playerBullets.push(new Bullet(tipX, tipY, Math.cos(a) * 8, Math.sin(a) * 8));
+  shootCooldown = 8;
+}
+
+function spawnExplosion(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    game.particles.push(new Particle(x, y, color));
+  }
+}
+
+function updateHUD() {
+  let p = game.player;
+  let hearts = '';
+  for (let i = 0; i < p.maxHp; i++) {
+    hearts += i < p.hp ? '❤️' : '🖤';
+  }
+  document.getElementById('hpDisplay').textContent = hearts;
+  document.getElementById('scoreDisplay').textContent = '分数: ' + game.score;
+  
+  if (game.boss && game.boss.alive) {
+    let pct = Math.max(0, game.boss.hp / game.boss.maxHp * 100);
+    document.getElementById('bossBarInner').style.width = pct + '%';
+  }
+}
+
+function gameLoop() {
+  if (!game || game.state !== 'playing') return;
+  
+  const W = canvas.width, H = canvas.height;
+  let p = game.player;
+  
+  // Player movement
+  let dx = 0, dy = 0;
+  if (keys['w'] || keys['W'] || keys['ArrowUp']) dy = -1;
+  if (keys['s'] || keys['S'] || keys['ArrowDown']) dy = 1;
+  if (keys['a'] || keys['A'] || keys['ArrowLeft']) dx = -1;
+  if (keys['d'] || keys['D'] || keys['ArrowRight']) dx = 1;
+  
+  if (dx !== 0 || dy !== 0) {
+    let len = Math.sqrt(dx*dx + dy*dy);
+    p.x += (dx/len) * p.speed;
+    p.y += (dy/len) * p.speed;
+  }
+  p.x = Math.max(25, Math.min(W - 25, p.x));
+  p.y = Math.max(25, Math.min(H - 25, p.y));
+  
+  // Turret follows mouse
+  p.turretAngle = Math.atan2(mouseY - p.y, mouseX - p.x);
+  
+  // Shooting
+  if (shootCooldown > 0) shootCooldown--;
+  if (mouseDown) playerShoot();
+  
+  p.update();
+  
+  // Update enemies
+  game.enemies.forEach(e => e.update(p, W, H));
+  
+  // Update player bullets
+  game.playerBullets.forEach(b => {
+    b.update();
+    // Check collision with enemies
+    game.enemies.forEach(e => {
+      if (!e.alive) return;
+      let hw = e.w / 2, hh = e.h / 2;
+      if (b.x > e.x - hw && b.x < e.x + hw && b.y > e.y - hh && b.y < e.y + hh) {
+        b.alive = false;
+        e.hp--;
+        e.flash = 5;
+        spawnExplosion(b.x, b.y, '#ffaa00', 5);
+        
+        if (e.hp <= 0) {
+          e.alive = false;
+          spawnExplosion(e.x, e.y, '#ff4444', 25);
+          if (e.type === 'boss') {
+            game.score += 500;
+            game.boss = null;
+            document.getElementById('bossBar').style.display = 'none';
+          } else {
+            game.score += 100;
+          }
+        }
+      }
+    });
+  });
+  
+  // Update enemy bullets
+  game.enemyBullets.forEach(b => {
+    b.x += b.vx;
+    b.y += b.vy;
+    // Check collision with player
+    if (p.alive && p.invincible <= 0) {
+      let dist = Math.hypot(b.x - p.x, b.y - p.y);
+      if (dist < 16) {
+        p.hp -= b.dmg;
+        p.flash = 5;
+        p.invincible = 30; // brief invincibility after hit
+        b.alive = false;
+        spawnExplosion(p.x, p.y, '#4ecdc4', 8);
+        
+        if (p.hp <= 0) {
+          p.alive = false;
+          spawnExplosion(p.x, p.y, '#4ecdc4', 30);
+          game.state = 'gameover';
+        }
+      }
+    }
+  });
+  
+  // Update particles
+  game.particles.forEach(pt => pt.update());
+  
+  // Clean up
+  game.playerBullets = game.playerBullets.filter(b => b.alive && b.x > -10 && b.x < W+10 && b.y > -10 && b.y < H+10);
+  game.enemyBullets = game.enemyBullets.filter(b => b.x > -10 && b.x < W+10 && b.y > -10 && b.y < H+10);
+  game.particles = game.particles.filter(pt => pt.life > 0);
+  
+  // Check wave clear
+  let aliveEnemies = game.enemies.filter(e => e.alive);
+  if (aliveEnemies.length === 0 && game.state === 'playing') {
+    if (game.bossSpawned) {
+      // Boss defeated - WIN!
+      game.state = 'win';
+    } else {
+      // Next wave
+      game.waveTimer++;
+      if (game.waveTimer > 60) {
+        game.waveTimer = 0;
+        spawnWave();
+      }
+    }
+  }
+  
+  // ===== DRAW =====
+  // Background
+  ctx.fillStyle = '#16213e';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 50) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 50) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  
+  // Stars
+  game.stars.forEach(s => {
+    ctx.globalAlpha = 0.3 + s.a * 0.7;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  
+  // Draw bullets
+  game.playerBullets.forEach(b => b.draw());
+  
+  // Draw enemy bullets
+  game.enemyBullets.forEach(b => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fillStyle = b.color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 68, 68, 0.3)';
+    ctx.fill();
+  });
+  
+  // Draw tanks
+  game.player.draw();
+  game.enemies.forEach(e => e.draw());
+  
+  // Draw particles
+  game.particles.forEach(pt => pt.draw());
+  
+  // Wave clear message
+  if (game.state === 'playing' && game.enemies.filter(e => e.alive).length === 0 && !game.bossSpawned) {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('波次清除！准备下一波...', W/2, H/2);
+  }
+  
+  updateHUD();
+  
+  // Handle end states
+  if (game.state === 'gameover') {
+    document.getElementById('finalScore').textContent = '最终分数: ' + game.score;
+    document.getElementById('gameOverScreen').style.display = 'flex';
+    return;
+  }
+  if (game.state === 'win') {
+    document.getElementById('winScore').textContent = '最终分数: ' + game.score;
+    document.getElementById('winScreen').style.display = 'flex';
+    return;
+  }
+  
+  animId = requestAnimationFrame(gameLoop);
+}
+</script>
+
+</body>
+</html>
