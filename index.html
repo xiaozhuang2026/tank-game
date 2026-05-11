@@ -141,7 +141,8 @@ canvas {
     <button class="btn" onclick="startGame()">开始游戏</button>
     <div class="instructions">
       WASD / 方向键 - 移动<br>
-      鼠标瞄准 - 点击/空格键射击<br>
+      IJKL - 控制炮管方向<br>
+      鼠标瞄准 / 空格键 - 射击<br>
       击败所有敌人后进入Boss战！
     </div>
   </div>
@@ -513,8 +514,20 @@ function gameLoop() {
   p.x = Math.max(25, Math.min(W - 25, p.x));
   p.y = Math.max(25, Math.min(H - 25, p.y));
   
-  // Turret follows mouse
-  p.turretAngle = Math.atan2(mouseY - p.y, mouseX - p.x);
+  // Turret control: IJKL keys or mouse
+  let aimDx = 0, aimDy = 0;
+  if (keys['j'] || keys['J']) aimDx = -1;
+  if (keys['l'] || keys['L']) aimDx = 1;
+  if (keys['i'] || keys['I']) aimDy = -1;
+  if (keys['k'] || keys['K']) aimDy = 1;
+  
+  if (aimDx !== 0 || aimDy !== 0) {
+    // Keyboard aim takes priority
+    p.turretAngle = Math.atan2(aimDy, aimDx);
+  } else {
+    // Fall back to mouse aim
+    p.turretAngle = Math.atan2(mouseY - p.y, mouseX - p.x);
+  }
   
   // Shooting
   if (shootCooldown > 0) shootCooldown--;
