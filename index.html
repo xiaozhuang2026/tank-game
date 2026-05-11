@@ -141,7 +141,7 @@ canvas {
     <button class="btn" onclick="startGame()">开始游戏</button>
     <div class="instructions">
       WASD / 方向键 - 移动<br>
-      鼠标瞄准 - 点击射击<br>
+      鼠标瞄准 - 点击/空格键射击<br>
       击败所有敌人后进入Boss战！
     </div>
   </div>
@@ -518,7 +518,7 @@ function gameLoop() {
   
   // Shooting
   if (shootCooldown > 0) shootCooldown--;
-  if (mouseDown) playerShoot();
+  if (mouseDown || keys[' ']) playerShoot();
   
   p.update();
   
