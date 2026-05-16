@@ -143,6 +143,7 @@ canvas {
       WASD / 方向键 - 移动<br>
       IJKL - 控制炮管方向<br>
       鼠标瞄准 / 空格键 - 射击<br>
+      🧱 砖墙可以打碎 | 🛡️ 钢墙不可摧毁<br>
       击败所有敌人后进入Boss战！
     </div>
   </div>
@@ -182,6 +183,246 @@ canvas.addEventListener('mousemove', e => {
 canvas.addEventListener('mousedown', e => { mouseDown = true; });
 canvas.addEventListener('mouseup', e => { mouseDown = false; });
 
+// ===== OBSTACLE SYSTEM =====
+const BRICK_SIZE = 30; // each brick block size
+const STEEL_SIZE = 40;
+
+class Obstacle {
+  constructor(x, y, type) {
+    this.x = x; // center x
+    this.y = y; // center y
+    this.type = type; // 'brick' or 'steel'
+    this.w = type === 'brick' ? BRICK_SIZE : STEEL_SIZE;
+    this.h = type === 'brick' ? BRICK_SIZE : STEEL_SIZE;
+    this.alive = true;
+    this.hp = type === 'brick' ? 2 : 999; // brick takes 2 hits, steel indestructible
+    this.maxHp = this.hp;
+    this.flash = 0;
+    // Random brick pattern seed
+    this.pattern = Math.floor(Math.random() * 4);
+  }
+  
+  draw() {
+    if (!this.alive) return;
+    ctx.save();
+    
+    if (this.type === 'brick') {
+      // Brick wall - brownish with brick pattern
+      let dmgRatio = this.hp / this.maxHp;
+      let baseColor = this.flash > 0 ? '#fff' : '#b5651d';
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+      
+      // Brick lines
+      ctx.strokeStyle = '#8B4513';
+      ctx.lineWidth = 1;
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(this.x - this.w/2, this.y);
+      ctx.lineTo(this.x + this.w/2, this.y);
+      ctx.stroke();
+      // Vertical lines (staggered like real bricks)
+      if (this.pattern % 2 === 0) {
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - this.h/2);
+        ctx.lineTo(this.x, this.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(this.x - this.w/4, this.y);
+        ctx.lineTo(this.x - this.w/4, this.y + this.h/2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.w/4, this.y);
+        ctx.lineTo(this.x + this.w/4, this.y + this.h/2);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(this.x, this.y + this.h/2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(this.x - this.w/4, this.y - this.h/2);
+        ctx.lineTo(this.x - this.w/4, this.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.w/4, this.y - this.h/2);
+        ctx.lineTo(this.x + this.w/4, this.y);
+        ctx.stroke();
+      }
+      
+      // Damage cracks
+      if (this.hp < this.maxHp) {
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(this.x - 5, this.y - 3);
+        ctx.lineTo(this.x + 2, this.y + 1);
+        ctx.lineTo(this.x + 7, this.y - 5);
+        ctx.stroke();
+      }
+      
+      // Border
+      ctx.strokeStyle = '#a0522d';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+      
+    } else {
+      // Steel wall - metallic look
+      let baseColor = this.flash > 0 ? '#fff' : '#708090';
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+      
+      // Metallic shine
+      let grad = ctx.createLinearGradient(this.x - this.w/2, this.y - this.h/2, this.x + this.w/2, this.y + this.h/2);
+      grad.addColorStop(0, 'rgba(255,255,255,0.2)');
+      grad.addColorStop(0.5, 'rgba(255,255,255,0)');
+      grad.addColorStop(1, 'rgba(255,255,255,0.1)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+      
+      // Rivets (4 corners)
+      ctx.fillStyle = '#556';
+      let rv = 3;
+      let ox = this.w/2 - 6, oy = this.h/2 - 6;
+      ctx.beginPath(); ctx.arc(this.x - ox, this.y - oy, rv, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(this.x + ox, this.y - oy, rv, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(this.x - ox, this.y + oy, rv, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(this.x + ox, this.y + oy, rv, 0, Math.PI*2); ctx.fill();
+      
+      // Border
+      ctx.strokeStyle = '#556';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+    }
+    
+    if (this.flash > 0) this.flash--;
+    ctx.restore();
+  }
+}
+
+function generateObstacles(wave) {
+  let obstacles = [];
+  const W = canvas.width, H = canvas.height;
+  const playerSafeZone = { x: 450, y: 500, r: 100 };
+  
+  // Helper: check if position overlaps with existing obstacles or player spawn
+  function overlaps(ox, oy, ow, oh) {
+    // Check player safe zone
+    if (Math.hypot(ox - playerSafeZone.x, oy - playerSafeZone.y) < playerSafeZone.r) return true;
+    // Check existing obstacles
+    for (let ob of obstacles) {
+      if (Math.abs(ox - ob.x) < (ow + ob.w) / 2 + 5 && Math.abs(oy - ob.y) < (oh + ob.h) / 2 + 5) return true;
+    }
+    return false;
+  }
+  
+  // Wave 1: Simple scattered bricks
+  if (wave >= 1) {
+    let brickCount = 8 + wave * 3;
+    for (let i = 0; i < brickCount; i++) {
+      let bx, ny, attempts = 0;
+      do {
+        bx = BRICK_SIZE + Math.random() * (W - BRICK_SIZE * 2);
+        ny = BRICK_SIZE + Math.random() * (H - BRICK_SIZE * 2);
+        attempts++;
+      } while (overlaps(bx, ny, BRICK_SIZE, BRICK_SIZE) && attempts < 50);
+      if (attempts < 50) obstacles.push(new Obstacle(bx, ny, 'brick'));
+    }
+  }
+  
+  // Wave 2+: Add steel walls
+  if (wave >= 2) {
+    let steelCount = wave;
+    for (let i = 0; i < steelCount; i++) {
+      let sx, sy, attempts = 0;
+      do {
+        sx = STEEL_SIZE + Math.random() * (W - STEEL_SIZE * 2);
+        sy = STEEL_SIZE + Math.random() * (H - STEEL_SIZE * 2);
+        attempts++;
+      } while (overlaps(sx, sy, STEEL_SIZE, STEEL_SIZE) && attempts < 50);
+      if (attempts < 50) obstacles.push(new Obstacle(sx, sy, 'steel'));
+    }
+  }
+  
+  // Wave 3+: Add brick wall clusters (L-shapes, lines)
+  if (wave >= 3) {
+    let clusterCount = 2;
+    for (let c = 0; c < clusterCount; c++) {
+      let cx = 100 + Math.random() * (W - 200);
+      let cy = 100 + Math.random() * (H - 300);
+      let shape = Math.floor(Math.random() * 3);
+      let positions = [];
+      
+      if (shape === 0) {
+        // L-shape
+        positions = [
+          [0, 0], [0, BRICK_SIZE], [0, BRICK_SIZE*2],
+          [BRICK_SIZE, BRICK_SIZE*2]
+        ];
+      } else if (shape === 1) {
+        // Horizontal line
+        positions = [
+          [-BRICK_SIZE, 0], [0, 0], [BRICK_SIZE, 0]
+        ];
+      } else {
+        // T-shape
+        positions = [
+          [-BRICK_SIZE, 0], [0, 0], [BRICK_SIZE, 0],
+          [0, BRICK_SIZE]
+        ];
+      }
+      
+      for (let [px, py] of positions) {
+        let bx = cx + px, ny = cy + py;
+        if (!overlaps(bx, ny, BRICK_SIZE, BRICK_SIZE) && bx > BRICK_SIZE && bx < W - BRICK_SIZE && ny > BRICK_SIZE && ny < H - BRICK_SIZE) {
+          obstacles.push(new Obstacle(bx, ny, 'brick'));
+        }
+      }
+    }
+  }
+  
+  return obstacles;
+}
+
+// Check if a rectangle collides with any obstacle (for tank movement)
+function collideObstacles(cx, cy, hw, hh) {
+  for (let ob of game.obstacles) {
+    if (!ob.alive) continue;
+    if (Math.abs(cx - ob.x) < hw + ob.w/2 && Math.abs(cy - ob.y) < hh + ob.h/2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Check bullet vs obstacles
+function bulletHitObstacles(bx, by, isPlayerBullet) {
+  for (let ob of game.obstacles) {
+    if (!ob.alive) continue;
+    if (Math.abs(bx - ob.x) < ob.w/2 + 4 && Math.abs(by - ob.y) < ob.h/2 + 4) {
+      if (ob.type === 'brick') {
+        ob.hp--;
+        ob.flash = 5;
+        if (ob.hp <= 0) {
+          ob.alive = false;
+          spawnExplosion(ob.x, ob.y, '#b5651d', 10);
+          if (isPlayerBullet) game.score += 5;
+        } else {
+          spawnExplosion(bx, by, '#cd853f', 3);
+        }
+        return 'hit';
+      } else {
+        // Steel - bullet destroyed, spawn spark
+        ob.flash = 3;
+        spawnExplosion(bx, by, '#c0c0c0', 5);
+        return 'hit';
+      }
+    }
+  }
+  return 'miss';
+}
+
+// ===== TANK =====
 class Tank {
   constructor(x, y, color, isPlayer) {
     this.x = x;
@@ -194,7 +435,7 @@ class Tank {
     this.turretAngle = 0;
     this.speed = isPlayer ? 4 : 1.2;
     this.hp = isPlayer ? 8 : 2;
-    this.invincible = isPlayer ? 120 : 0; // 2 seconds invincibility at start
+    this.invincible = isPlayer ? 120 : 0;
     this.maxHp = this.hp;
     this.shootTimer = 0;
     this.bullets = [];
@@ -204,22 +445,18 @@ class Tank {
   
   draw() {
     if (!this.alive) return;
-    // Blink when invincible
     if (this.invincible > 0 && Math.floor(this.invincible / 4) % 2 === 0) return;
     ctx.save();
     ctx.translate(this.x, this.y);
     
-    // Body
     let bodyColor = this.flash > 0 ? '#fff' : this.color;
     ctx.fillStyle = bodyColor;
     ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
     
-    // Tracks
     ctx.fillStyle = '#555';
     ctx.fillRect(-this.w/2 - 2, -this.h/2 - 4, this.w + 4, 6);
     ctx.fillRect(-this.w/2 - 2, this.h/2 - 2, this.w + 4, 6);
     
-    // Turret (follows mouse for player, follows target for enemy)
     ctx.rotate(this.turretAngle);
     ctx.fillStyle = this.isPlayer ? '#4ecdc4' : '#ff6b6b';
     ctx.fillRect(-5, -4, 30, 8);
@@ -243,7 +480,7 @@ class Tank {
 class Enemy extends Tank {
   constructor(x, y, type) {
     super(x, y, '#e94560', false);
-    this.type = type; // 'normal' or 'boss'
+    this.type = type;
     if (type === 'boss') {
       this.w = 70;
       this.h = 50;
@@ -263,7 +500,6 @@ class Enemy extends Tank {
     if (!this.alive) return;
     
     if (this.type === 'boss') {
-      // Boss AI - circle around center, shoot at player
       this.moveTimer++;
       let cx = W / 2, cy = H / 2;
       let radius = 180;
@@ -275,39 +511,46 @@ class Enemy extends Tank {
       let dy = this.targetY - this.y;
       let dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 5) {
-        this.x += (dx/dist) * this.speed;
-        this.y += (dy/dist) * this.speed;
+        let nx = this.x + (dx/dist) * this.speed;
+        let ny = this.y + (dy/dist) * this.speed;
+        // Boss ignores obstacles (it's big and powerful)
+        this.x = nx;
+        this.y = ny;
       }
       
-      // Turret aims at player
       this.turretAngle = Math.atan2(player.y - this.y, player.x - this.x);
       
-      // Boss shoots every 20 frames
       if (this.shootTimer <= 0) {
         this.shoot(player);
         this.shootTimer = 20;
       }
     } else {
-      // Normal enemy - random movement, shoot at player
       this.moveTimer++;
       if (this.moveTimer > 90) {
         this.moveAngle = Math.random() * Math.PI * 2;
         this.moveTimer = 0;
       }
       
-      this.x += Math.cos(this.moveAngle) * this.speed;
-      this.y += Math.sin(this.moveAngle) * this.speed;
+      let nx = this.x + Math.cos(this.moveAngle) * this.speed;
+      let ny = this.y + Math.sin(this.moveAngle) * this.speed;
       
       // Bounce off walls
-      if (this.x < 30 || this.x > W - 30) this.moveAngle = Math.PI - this.moveAngle;
-      if (this.y < 30 || this.y > H - 30) this.moveAngle = -this.moveAngle;
-      this.x = Math.max(30, Math.min(W - 30, this.x));
-      this.y = Math.max(30, Math.min(H - 30, this.y));
+      if (nx < 30 || nx > W - 30) this.moveAngle = Math.PI - this.moveAngle;
+      if (ny < 30 || ny > H - 30) this.moveAngle = -this.moveAngle;
+      nx = Math.max(30, Math.min(W - 30, nx));
+      ny = Math.max(30, Math.min(H - 30, ny));
       
-      // Turret aims at player
+      // Bounce off obstacles
+      if (collideObstacles(nx, ny, this.w/2, this.h/2)) {
+        this.moveAngle = Math.PI - this.moveAngle + (Math.random() - 0.5) * 1.0;
+        this.moveTimer = 80; // will change direction soon
+      } else {
+        this.x = nx;
+        this.y = ny;
+      }
+      
       this.turretAngle = Math.atan2(player.y - this.y, player.x - this.x);
       
-      // Shoot every 90 frames
       if (this.shootTimer <= 0) {
         this.shoot(player);
         this.shootTimer = 90 + Math.random() * 60;
@@ -329,7 +572,6 @@ class Enemy extends Tank {
       color: '#ff4444'
     });
     
-    // Boss shoots spread
     if (this.type === 'boss' && game.wave >= 3) {
       for (let i = -1; i <= 1; i += 2) {
         let sa = a + i * 0.3;
@@ -409,16 +651,16 @@ function startGame() {
     playerBullets: [],
     enemyBullets: [],
     particles: [],
+    obstacles: [],
     score: 0,
     wave: 0,
     waveTimer: 0,
     bossSpawned: false,
     boss: null,
-    state: 'playing', // playing, gameover, win
+    state: 'playing',
     stars: []
   };
   
-  // Generate background stars
   for (let i = 0; i < 80; i++) {
     game.stars.push({
       x: Math.random() * canvas.width,
@@ -448,8 +690,11 @@ function spawnWave() {
       let e = new Enemy(ex, ey, 'normal');
       game.enemies.push(e);
     }
+    // Generate obstacles for this wave (fresh layout each wave)
+    game.obstacles = generateObstacles(game.wave);
   } else {
-    // Boss wave!
+    // Boss wave - clear obstacles for epic fight
+    game.obstacles = [];
     let boss = new Enemy(canvas.width / 2, 150, 'boss');
     boss.hp = 50;
     boss.maxHp = 50;
@@ -499,7 +744,7 @@ function gameLoop() {
   const W = canvas.width, H = canvas.height;
   let p = game.player;
   
-  // Player movement
+  // Player movement with obstacle collision
   let dx = 0, dy = 0;
   if (keys['w'] || keys['W'] || keys['ArrowUp']) dy = -1;
   if (keys['s'] || keys['S'] || keys['ArrowDown']) dy = 1;
@@ -508,13 +753,28 @@ function gameLoop() {
   
   if (dx !== 0 || dy !== 0) {
     let len = Math.sqrt(dx*dx + dy*dy);
-    p.x += (dx/len) * p.speed;
-    p.y += (dy/len) * p.speed;
+    let nx = p.x + (dx/len) * p.speed;
+    let ny = p.y + (dy/len) * p.speed;
+    
+    // Try full movement
+    if (!collideObstacles(nx, ny, p.w/2, p.h/2)) {
+      p.x = nx;
+      p.y = ny;
+    } else {
+      // Try horizontal only (slide along walls)
+      if (!collideObstacles(nx, p.y, p.w/2, p.h/2)) {
+        p.x = nx;
+      }
+      // Try vertical only
+      else if (!collideObstacles(p.x, ny, p.w/2, p.h/2)) {
+        p.y = ny;
+      }
+    }
   }
   p.x = Math.max(25, Math.min(W - 25, p.x));
   p.y = Math.max(25, Math.min(H - 25, p.y));
   
-  // Turret control: IJKL keys or mouse
+  // Turret control
   let aimDx = 0, aimDy = 0;
   if (keys['j'] || keys['J']) aimDx = -1;
   if (keys['l'] || keys['L']) aimDx = 1;
@@ -522,10 +782,8 @@ function gameLoop() {
   if (keys['k'] || keys['K']) aimDy = 1;
   
   if (aimDx !== 0 || aimDy !== 0) {
-    // Keyboard aim takes priority
     p.turretAngle = Math.atan2(aimDy, aimDx);
   } else {
-    // Fall back to mouse aim
     p.turretAngle = Math.atan2(mouseY - p.y, mouseX - p.x);
   }
   
@@ -543,7 +801,7 @@ function gameLoop() {
     b.update();
     // Check collision with enemies
     game.enemies.forEach(e => {
-      if (!e.alive) return;
+      if (!e.alive || !b.alive) return;
       let hw = e.w / 2, hh = e.h / 2;
       if (b.x > e.x - hw && b.x < e.x + hw && b.y > e.y - hh && b.y < e.y + hh) {
         b.alive = false;
@@ -564,6 +822,11 @@ function gameLoop() {
         }
       }
     });
+    // Check collision with obstacles
+    if (b.alive) {
+      let result = bulletHitObstacles(b.x, b.y, true);
+      if (result === 'hit') b.alive = false;
+    }
   });
   
   // Update enemy bullets
@@ -576,7 +839,7 @@ function gameLoop() {
       if (dist < 16) {
         p.hp -= b.dmg;
         p.flash = 5;
-        p.invincible = 30; // brief invincibility after hit
+        p.invincible = 30;
         b.alive = false;
         spawnExplosion(p.x, p.y, '#4ecdc4', 8);
         
@@ -586,6 +849,11 @@ function gameLoop() {
           game.state = 'gameover';
         }
       }
+    }
+    // Check collision with obstacles (enemy bullets also hit walls)
+    if (b.alive) {
+      let result = bulletHitObstacles(b.x, b.y, false);
+      if (result === 'hit') b.alive = false;
     }
   });
   
@@ -601,10 +869,8 @@ function gameLoop() {
   let aliveEnemies = game.enemies.filter(e => e.alive);
   if (aliveEnemies.length === 0 && game.state === 'playing') {
     if (game.bossSpawned) {
-      // Boss defeated - WIN!
       game.state = 'win';
     } else {
-      // Next wave
       game.waveTimer++;
       if (game.waveTimer > 60) {
         game.waveTimer = 0;
@@ -614,7 +880,6 @@ function gameLoop() {
   }
   
   // ===== DRAW =====
-  // Background
   ctx.fillStyle = '#16213e';
   ctx.fillRect(0, 0, W, H);
   
@@ -637,6 +902,9 @@ function gameLoop() {
     ctx.fill();
   });
   ctx.globalAlpha = 1;
+  
+  // Draw obstacles (behind tanks)
+  game.obstacles.forEach(ob => ob.draw());
   
   // Draw bullets
   game.playerBullets.forEach(b => b.draw());
@@ -670,7 +938,6 @@ function gameLoop() {
   
   updateHUD();
   
-  // Handle end states
   if (game.state === 'gameover') {
     document.getElementById('finalScore').textContent = '最终分数: ' + game.score;
     document.getElementById('gameOverScreen').style.display = 'flex';
