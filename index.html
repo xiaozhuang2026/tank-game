@@ -128,6 +128,7 @@ canvas {
     <div class="hud-item" id="scoreDisplay">分数: 0</div>
     <div class="hud-item" id="waveDisplay">波次: 1</div>
     <div class="hud-item" id="hpDisplay">❤️❤️❤️❤️❤️❤️❤️❤️</div>
+    <div class="hud-item" id="buffDisplay" style="font-size:14px;color:#ffd700;"></div>
   </div>
   
   <div id="bossBar">
@@ -144,6 +145,8 @@ canvas {
       IJKL - 控制炮管方向<br>
       鼠标瞄准 / 空格键 - 射击<br>
       🧱 砖墙可以打碎 | 🛡️ 钢墙不可摧毁<br>
+      💎 消灭敌人掉落道具，走过去拾取！<br>
+      ❤️回血 ⚡加速 🔥火力 🛡️护盾 ⭐散弹<br>
       击败所有敌人后进入Boss战！
     </div>
   </div>
@@ -655,6 +658,103 @@ class Particle {
   }
 }
 
+// ===== POWERUP SYSTEM =====
+const POWERUP_TYPES = [
+  { id: 'heal',   icon: '❤️', color: '#ff4444', label: '回血',  desc: '+3 HP' },
+  { id: 'speed',  icon: '⚡', color: '#ffdd00', label: '加速',  desc: '速度x1.5' },
+  { id: 'fire',   icon: '🔥', color: '#ff8800', label: '火力',  desc: '双倍伤害' },
+  { id: 'shield', icon: '🛡️', color: '#44aaff', label: '护盾',  desc: '无敌5秒' },
+  { id: 'spread', icon: '⭐', color: '#aa44ff', label: '散弹',  desc: '三发散射' },
+];
+
+class PowerUp {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+    this.r = 16;
+    this.alive = true;
+    this.timer = 0;
+    this.lifespan = 600; // 10 seconds before disappearing
+  }
+  update() {
+    this.timer++;
+    if (this.timer > this.lifespan) this.alive = false;
+  }
+  draw() {
+    if (!this.alive) return;
+    let pulse = 1 + Math.sin(this.timer * 0.08) * 0.15;
+    let alpha = this.timer > this.lifespan - 120 ? (this.lifespan - this.timer) / 120 : 1;
+    
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    
+    // Glow circle
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r * pulse + 6, 0, Math.PI * 2);
+    ctx.fillStyle = this.type.color + '33';
+    ctx.fill();
+    
+    // Background circle
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r * pulse, 0, Math.PI * 2);
+    ctx.fillStyle = this.type.color + '88';
+    ctx.fill();
+    ctx.strokeStyle = this.type.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Icon
+    ctx.font = (this.r * pulse) + 'px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(this.type.icon, this.x, this.y);
+    
+    // Blinking warning when about to disappear
+    if (this.timer > this.lifespan - 120 && Math.floor(this.timer / 8) % 2 === 0) {
+      ctx.globalAlpha = 0.3;
+    }
+    
+    ctx.restore();
+  }
+}
+
+// Active buff timers on the player
+function hasBuff(buffId) {
+  return game && game.buffs && game.buffs[buffId] && game.buffs[buffId] > 0;
+}
+
+function applyPowerUp(pu) {
+  let p = game.player;
+  let id = pu.type.id;
+  
+  if (!game.buffs) game.buffs = {};
+  
+  // Show pickup text
+  game.pickupTexts.push({ text: pu.type.icon + ' ' + pu.type.desc, x: p.x, y: p.y - 30, timer: 60, color: pu.type.color });
+  
+  switch(id) {
+    case 'heal':
+      p.hp = Math.min(p.maxHp, p.hp + 3);
+      break;
+    case 'speed':
+      game.buffs.speed = 480; // 8 seconds
+      break;
+    case 'fire':
+      game.buffs.fire = 360; // 6 seconds
+      break;
+    case 'shield':
+      game.buffs.shield = 300; // 5 seconds
+      p.invincible = 300;
+      break;
+    case 'spread':
+      game.buffs.spread = 420; // 7 seconds
+      break;
+  }
+  spawnExplosion(pu.x, pu.y, pu.type.color, 12);
+}
+
 function startGame() {
   document.getElementById('startScreen').style.display = 'none';
   document.getElementById('gameOverScreen').style.display = 'none';
@@ -669,6 +769,9 @@ function startGame() {
     enemyBullets: [],
     particles: [],
     obstacles: [],
+    powerups: [],
+    buffs: {},
+    pickupTexts: [],
     score: 0,
     wave: 0,
     waveTimer: 0,
@@ -730,8 +833,24 @@ function playerShoot() {
   let a = p.turretAngle;
   let tipX = p.x + Math.cos(a) * 30;
   let tipY = p.y + Math.sin(a) * 30;
-  game.playerBullets.push(new Bullet(tipX, tipY, Math.cos(a) * 8, Math.sin(a) * 8));
-  shootCooldown = 8;
+  let speed = 8;
+  let dmg = hasBuff('fire') ? 2 : 1;
+  
+  if (hasBuff('spread')) {
+    // Triple spread shot
+    for (let i = -1; i <= 1; i++) {
+      let sa = a + i * 0.2;
+      game.playerBullets.push(new Bullet(
+        p.x + Math.cos(sa) * 30, p.y + Math.sin(sa) * 30,
+        Math.cos(sa) * speed, Math.sin(sa) * speed
+      ));
+      game.playerBullets[game.playerBullets.length-1].dmg = dmg;
+    }
+  } else {
+    game.playerBullets.push(new Bullet(tipX, tipY, Math.cos(a) * speed, Math.sin(a) * speed));
+    game.playerBullets[game.playerBullets.length-1].dmg = dmg;
+  }
+  shootCooldown = hasBuff('fire') ? 6 : 8; // faster fire rate with fire buff
 }
 
 function spawnExplosion(x, y, color, count) {
@@ -753,6 +872,16 @@ function updateHUD() {
     let pct = Math.max(0, game.boss.hp / game.boss.maxHp * 100);
     document.getElementById('bossBarInner').style.width = pct + '%';
   }
+  
+  // Buff display
+  let buffStr = '';
+  if (game.buffs) {
+    if (hasBuff('speed'))  buffStr += '⚡' + Math.ceil(game.buffs.speed/60) + 's ';
+    if (hasBuff('fire'))   buffStr += '🔥' + Math.ceil(game.buffs.fire/60) + 's ';
+    if (hasBuff('shield')) buffStr += '🛡️' + Math.ceil(game.buffs.shield/60) + 's ';
+    if (hasBuff('spread')) buffStr += '⭐' + Math.ceil(game.buffs.spread/60) + 's ';
+  }
+  document.getElementById('buffDisplay').textContent = buffStr;
 }
 
 function gameLoop() {
@@ -770,8 +899,9 @@ function gameLoop() {
   
   if (dx !== 0 || dy !== 0) {
     let len = Math.sqrt(dx*dx + dy*dy);
-    let nx = p.x + (dx/len) * p.speed;
-    let ny = p.y + (dy/len) * p.speed;
+    let spd = hasBuff('speed') ? p.speed * 1.5 : p.speed;
+    let nx = p.x + (dx/len) * spd;
+    let ny = p.y + (dy/len) * spd;
     
     // Try full movement
     if (!collideObstacles(nx, ny, p.w/2, p.h/2)) {
@@ -823,7 +953,7 @@ function gameLoop() {
       let hw = e.w / 2, hh = e.h / 2;
       if (b.x > e.x - hw && b.x < e.x + hw && b.y > e.y - hh && b.y < e.y + hh) {
         b.alive = false;
-        e.hp--;
+        e.hp -= (b.dmg || 1);
         e.flash = 5;
         spawnExplosion(b.x, b.y, '#ffaa00', 5);
         
@@ -834,8 +964,16 @@ function gameLoop() {
             game.score += 500;
             game.boss = null;
             document.getElementById('bossBar').style.display = 'none';
+            // Boss drops 3 powerups!
+            for (let i = 0; i < 3; i++) {
+              game.powerups.push(new PowerUp(e.x + (Math.random()-0.5)*60, e.y + (Math.random()-0.5)*40));
+            }
           } else {
             game.score += 100;
+            // 40% chance to drop powerup
+            if (Math.random() < 0.4) {
+              game.powerups.push(new PowerUp(e.x, e.y));
+            }
           }
         }
       }
@@ -879,10 +1017,40 @@ function gameLoop() {
   // Update particles
   game.particles.forEach(pt => pt.update());
   
+  // Update powerups
+  game.powerups.forEach(pu => pu.update());
+  
+  // Check player pickup powerups
+  game.powerups.forEach(pu => {
+    if (!pu.alive) return;
+    let dist = Math.hypot(pu.x - p.x, pu.y - p.y);
+    if (dist < 28) {
+      pu.alive = false;
+      applyPowerUp(pu);
+    }
+  });
+  
+  // Update buff timers
+  if (game.buffs) {
+    for (let key in game.buffs) {
+      if (game.buffs[key] > 0) game.buffs[key]--;
+    }
+  }
+  
+  // Keep shield invincibility in sync
+  if (hasBuff('shield') && p.invincible < game.buffs.shield) {
+    p.invincible = game.buffs.shield;
+  }
+  
+  // Update pickup texts
+  game.pickupTexts.forEach(t => { t.timer--; t.y -= 0.8; });
+  game.pickupTexts = game.pickupTexts.filter(t => t.timer > 0);
+  
   // Clean up
   game.playerBullets = game.playerBullets.filter(b => b.alive && b.x > -10 && b.x < W+10 && b.y > -10 && b.y < H+10);
-  game.enemyBullets = game.enemyBullets.filter(b => b.x > -10 && b.x < W+10 && b.y > -10 && b.y < H+10);
+  game.enemyBullets = game.enemyBullets.filter(b => b.alive && b.x > -10 && b.x < W+10 && b.y > -10 && b.y < H+10);
   game.particles = game.particles.filter(pt => pt.life > 0);
+  game.powerups = game.powerups.filter(pu => pu.alive);
   
   // Check wave clear
   let aliveEnemies = game.enemies.filter(e => e.alive);
@@ -925,6 +1093,9 @@ function gameLoop() {
   // Draw obstacles (behind tanks)
   game.obstacles.forEach(ob => ob.draw());
   
+  // Draw powerups
+  game.powerups.forEach(pu => pu.draw());
+  
   // Draw bullets
   game.playerBullets.forEach(b => b.draw());
   
@@ -943,6 +1114,34 @@ function gameLoop() {
   // Draw tanks
   game.player.draw();
   game.enemies.forEach(e => e.draw());
+  
+  // Draw shield aura on player
+  if (hasBuff('shield')) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 28, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(68, 170, 255, ' + (0.4 + Math.sin(Date.now() * 0.01) * 0.2) + ')';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  
+  // Draw speed trail
+  if (hasBuff('speed')) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 24, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 221, 0, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  
+  // Draw pickup texts
+  game.pickupTexts.forEach(t => {
+    ctx.globalAlpha = t.timer / 60;
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.text, t.x, t.y);
+    ctx.globalAlpha = 1;
+  });
   
   // Draw particles
   game.particles.forEach(pt => pt.draw());
