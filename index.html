@@ -395,11 +395,11 @@ function collideObstacles(cx, cy, hw, hh) {
   return false;
 }
 
-// Check bullet vs obstacles
-function bulletHitObstacles(bx, by, isPlayerBullet) {
+// Check if a point hits any obstacle
+function pointHitObstacle(bx, by, bulletR, isPlayerBullet) {
   for (let ob of game.obstacles) {
     if (!ob.alive) continue;
-    if (Math.abs(bx - ob.x) < ob.w/2 + 4 && Math.abs(by - ob.y) < ob.h/2 + 4) {
+    if (Math.abs(bx - ob.x) < ob.w/2 + bulletR && Math.abs(by - ob.y) < ob.h/2 + bulletR) {
       if (ob.type === 'brick') {
         ob.hp--;
         ob.flash = 5;
@@ -418,6 +418,23 @@ function bulletHitObstacles(bx, by, isPlayerBullet) {
         return 'hit';
       }
     }
+  }
+  return 'miss';
+}
+
+// Check bullet vs obstacles with sub-step raycast (prevents tunneling through thin walls)
+function bulletHitObstacles(bx, by, prevX, prevY, bulletR, isPlayerBullet) {
+  let dx = bx - prevX;
+  let dy = by - prevY;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+  let steps = Math.max(1, Math.ceil(dist / 4)); // check every 4px along the path
+  
+  for (let i = 0; i <= steps; i++) {
+    let t = i / steps;
+    let cx = prevX + dx * t;
+    let cy = prevY + dy * t;
+    let result = pointHitObstacle(cx, cy, bulletR, isPlayerBullet);
+    if (result === 'hit') return 'hit';
   }
   return 'miss';
 }
@@ -798,6 +815,7 @@ function gameLoop() {
   
   // Update player bullets
   game.playerBullets.forEach(b => {
+    let prevX = b.x, prevY = b.y;
     b.update();
     // Check collision with enemies
     game.enemies.forEach(e => {
@@ -822,15 +840,16 @@ function gameLoop() {
         }
       }
     });
-    // Check collision with obstacles
+    // Check collision with obstacles (raycast prevents tunneling)
     if (b.alive) {
-      let result = bulletHitObstacles(b.x, b.y, true);
+      let result = bulletHitObstacles(b.x, b.y, prevX, prevY, b.r, true);
       if (result === 'hit') b.alive = false;
     }
   });
   
   // Update enemy bullets
   game.enemyBullets.forEach(b => {
+    let prevX = b.x, prevY = b.y;
     b.x += b.vx;
     b.y += b.vy;
     // Check collision with player
@@ -850,9 +869,9 @@ function gameLoop() {
         }
       }
     }
-    // Check collision with obstacles (enemy bullets also hit walls)
+    // Check collision with obstacles (enemy bullets also blocked by walls)
     if (b.alive) {
-      let result = bulletHitObstacles(b.x, b.y, false);
+      let result = bulletHitObstacles(b.x, b.y, prevX, prevY, b.r, false);
       if (result === 'hit') b.alive = false;
     }
   });
