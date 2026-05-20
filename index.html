@@ -898,19 +898,21 @@ function spawnWave() {
   
   game.obstacles = generateObstacles(game.wave);
   
-  // 每关都有Boss！Boss随关卡变强
-  let bossHp = 20 + game.wave * 8;
-  let bossSpeed = 0.6 + game.wave * 0.025;
-  let bossX = 100 + Math.random() * (canvas.width - 200);
-  let boss = new Enemy(bossX, 60 + Math.random() * 30, 'boss');
-  boss.hp = bossHp;
-  boss.maxHp = bossHp;
-  boss.radius = 28;
-  boss.baseSpeed = bossSpeed;
-  game.enemies.push(boss);
-  game.boss = boss;
-  game.bossSpawned = true;
-  document.getElementById('bossBar').style.display = 'block';
+  // 每5关出一个Boss
+  if (game.wave % 5 === 0) {
+    let bossHp = 20 + game.wave * 8;
+    let bossSpeed = 0.6 + game.wave * 0.025;
+    let bossX = 100 + Math.random() * (canvas.width - 200);
+    let boss = new Enemy(bossX, 60 + Math.random() * 30, 'boss');
+    boss.hp = bossHp;
+    boss.maxHp = bossHp;
+    boss.radius = 28;
+    boss.baseSpeed = bossSpeed;
+    game.enemies.push(boss);
+    game.boss = boss;
+    game.bossSpawned = true;
+    document.getElementById('bossBar').style.display = 'block';
+  }
   
   // 小兵数量随关卡增加
   let count = 1 + Math.floor(game.wave * 0.8);
@@ -944,7 +946,11 @@ function spawnWave() {
   game.obstacles.push(new Obstacle(bx + 32, by, 'brick'));
   
   document.getElementById('waveDisplay').textContent = '第' + game.wave + '关';
-  game.pickupTexts.push({ text: '⚠️ 第' + game.wave + '关 BOSS出击！', x: 450, y: 280, timer: 100, color: '#ff4444' });
+  if (game.wave % 5 === 0) {
+    game.pickupTexts.push({ text: '⚠️ 第' + game.wave + '关 BOSS出击！', x: 450, y: 280, timer: 100, color: '#ff4444' });
+  } else {
+    game.pickupTexts.push({ text: '第' + game.wave + '关 开始！', x: 450, y: 280, timer: 80, color: '#ffffff' });
+  }
 }
 
 function playerShoot() {
