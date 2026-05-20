@@ -585,30 +585,35 @@ class Enemy extends Tank {
   
   shoot(player) {
     let a = Math.atan2(player.y - this.y, player.x - this.x);
-    let speed = this.type === 'boss' ? 3.5 : 2;
-    let dmg = this.type === 'boss' ? 1 : 1;
+    let speed = this.type === 'boss' ? 3.5 : 2.5;
+    let dmg = this.type === 'boss' ? 2 : 1;
     if (hasEnemyBuff(this, 'fire')) dmg *= 2;
-    game.enemyBullets.push({
-      x: this.x + Math.cos(this.turretAngle) * 30,
-      y: this.y + Math.sin(this.turretAngle) * 30,
-      vx: Math.cos(a) * speed,
-      vy: Math.sin(a) * speed,
-      r: this.type === 'boss' ? 5 : 3,
-      dmg: dmg,
-      color: hasEnemyBuff(this, 'fire') ? '#ff8800' : '#ff4444'
-    });
+    let bulletColor = hasEnemyBuff(this, 'fire') ? '#ff8800' : '#ff4444';
+    let bulletR = this.type === 'boss' ? 6 : 3;
     
-    // Boss spread or enemy with spread buff
-    if (this.type === 'boss' || hasEnemyBuff(this, 'spread')) {
-      let spreadAngle = this.type === 'boss' ? 0.3 : 0.25;
-      for (let i = -1; i <= 1; i += 2) {
-        let sa = a + i * spreadAngle;
+    // ALL enemies shoot 3 bullets (fan spread)
+    let spreadAngle = this.type === 'boss' ? 0.25 : 0.2;
+    for (let offset of [-spreadAngle, 0, spreadAngle]) {
+      let sa = a + offset;
+      game.enemyBullets.push({
+        x: this.x + Math.cos(this.turretAngle) * 30,
+        y: this.y + Math.sin(this.turretAngle) * 30,
+        vx: Math.cos(sa) * speed,
+        vy: Math.sin(sa) * speed,
+        r: bulletR, dmg: dmg, color: bulletColor
+      });
+    }
+    
+    // Boss extra wide spread at higher waves
+    if (this.type === 'boss' && game.wave >= 3) {
+      for (let offset of [-0.45, 0.45]) {
+        let sa = a + offset;
         game.enemyBullets.push({
           x: this.x + Math.cos(this.turretAngle) * 30,
           y: this.y + Math.sin(this.turretAngle) * 30,
           vx: Math.cos(sa) * speed,
           vy: Math.sin(sa) * speed,
-          r: this.type === 'boss' ? 5 : 3, dmg: dmg, color: hasEnemyBuff(this, 'fire') ? '#ff8800' : '#ff4444'
+          r: bulletR, dmg: dmg, color: bulletColor
         });
       }
     }
@@ -891,75 +896,55 @@ function spawnWave() {
   }
   game.waveTimer = 180;
   
-  let isBossLevel = game.wave % 5 === 0;
   game.obstacles = generateObstacles(game.wave);
   
-  if (isBossLevel) {
-    let bossCount = Math.min(Math.ceil(game.wave / 5), 3);
-    let bossHp = 25 + game.wave * 5;
-    let bossSpeed = 0.7 + game.wave * 0.02;
-    for (let i = 0; i < bossCount; i++) {
-      let bx = 150 + (i * 250) + Math.random() * 60;
-      if (bx > canvas.width - 80) bx = canvas.width - 80;
-      let boss = new Enemy(bx, 60 + Math.random() * 40, 'boss');
-      boss.hp = bossHp;
-      boss.maxHp = bossHp;
-      boss.radius = 28;
-      boss.baseSpeed = bossSpeed;
-      game.enemies.push(boss);
-      if (i === 0) { game.boss = boss; game.bossSpawned = true; }
-    }
-    // Minions
-    let minionCount = Math.floor(game.wave / 5) + 1;
-    for (let i = 0; i < minionCount; i++) {
-      let mx = 50 + Math.random() * 800;
-      let m = new Enemy(mx, 30 + Math.random() * 30, 'normal');
-      m.hp = 1 + Math.floor(game.wave / 4);
-      m.maxHp = m.hp;
-      m.baseSpeed = 0.8 + game.wave * 0.03;
-      game.enemies.push(m);
-    }
-    document.getElementById('bossBar').style.display = 'block';
-    game.pickupTexts.push({ text: '⚠️ BOSS关卡！', x: 450, y: 280, timer: 120, color: '#ff4444' });
-  } else {
-    let count = 2 + game.wave;
-    let hp = 1 + Math.floor(game.wave / 3);
-    let spd = 0.7 + game.wave * 0.04;
-    for (let i = 0; i < count; i++) {
-      let x, y;
-      do {
-        x = 80 + Math.random() * (canvas.width - 160);
-        y = 30 + Math.random() * 80;
-      } while (Math.hypot(x - game.player.x, y - game.player.y) < 150);
-      
-      let types = ['normal'];
-      if (game.wave >= 6) types.push('fast');
-      if (game.wave >= 11) types.push('heavy');
-      let t = types[Math.floor(Math.random() * types.length)];
-      let e = new Enemy(x, y, t);
-      e.hp = hp;
-      e.maxHp = hp;
-      if (t === 'fast') { e.baseSpeed = spd * 1.5; e.hp = Math.max(1, hp - 1); e.maxHp = e.hp; }
-      if (t === 'heavy') { e.baseSpeed = spd * 0.6; e.hp = hp * 2; e.maxHp = e.hp; }
-      game.enemies.push(e);
-    }
+  // 每关都有Boss！Boss随关卡变强
+  let bossHp = 20 + game.wave * 8;
+  let bossSpeed = 0.6 + game.wave * 0.025;
+  let bossX = 100 + Math.random() * (canvas.width - 200);
+  let boss = new Enemy(bossX, 60 + Math.random() * 30, 'boss');
+  boss.hp = bossHp;
+  boss.maxHp = bossHp;
+  boss.radius = 28;
+  boss.baseSpeed = bossSpeed;
+  game.enemies.push(boss);
+  game.boss = boss;
+  game.bossSpawned = true;
+  document.getElementById('bossBar').style.display = 'block';
+  
+  // 小兵数量随关卡增加
+  let count = 1 + Math.floor(game.wave * 0.8);
+  let hp = 1 + Math.floor(game.wave / 3);
+  let spd = 0.7 + game.wave * 0.04;
+  for (let i = 0; i < count; i++) {
+    let x, y;
+    do {
+      x = 80 + Math.random() * (canvas.width - 160);
+      y = 30 + Math.random() * 80;
+    } while (Math.hypot(x - game.player.x, y - game.player.y) < 150);
+    
+    let types = ['normal'];
+    if (game.wave >= 4) types.push('fast');
+    if (game.wave >= 8) types.push('heavy');
+    let t = types[Math.floor(Math.random() * types.length)];
+    let e = new Enemy(x, y, t);
+    e.hp = hp;
+    e.maxHp = hp;
+    if (t === 'fast') { e.baseSpeed = spd * 1.5; e.hp = Math.max(1, hp - 1); e.maxHp = e.hp; }
+    if (t === 'heavy') { e.baseSpeed = spd * 0.6; e.hp = hp * 2; e.maxHp = e.hp; }
+    game.enemies.push(e);
   }
   
   // Base protection walls (brick fortress)
   let bx = game.base.x, by = game.base.y;
-  // Top wall
   game.obstacles.push(new Obstacle(bx - 22, by - 32, 'brick'));
   game.obstacles.push(new Obstacle(bx, by - 32, 'brick'));
   game.obstacles.push(new Obstacle(bx + 22, by - 32, 'brick'));
-  // Left wall
   game.obstacles.push(new Obstacle(bx - 32, by, 'brick'));
-  // Right wall
   game.obstacles.push(new Obstacle(bx + 32, by, 'brick'));
   
   document.getElementById('waveDisplay').textContent = '第' + game.wave + '关';
-  if (game.wave > 1) {
-    game.pickupTexts.push({ text: '第' + game.wave + '关开始！', x: 450, y: 280, timer: 90, color: '#ffd700' });
-  }
+  game.pickupTexts.push({ text: '⚠️ 第' + game.wave + '关 BOSS出击！', x: 450, y: 280, timer: 100, color: '#ff4444' });
 }
 
 function playerShoot() {
@@ -1253,11 +1238,10 @@ function gameLoop() {
       game.waveTimer++;
       if (game.waveTimer > 60) {
         game.waveTimer = 0;
-        if (game.wave % 5 === 0) {
-          document.getElementById('bossBar').style.display = 'none';
-          game.bossSpawned = false;
-          game.boss = null;
-        }
+        // Reset boss state for next wave
+        document.getElementById('bossBar').style.display = 'none';
+        game.bossSpawned = false;
+        game.boss = null;
         spawnWave();
       }
     }
