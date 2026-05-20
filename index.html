@@ -126,8 +126,9 @@ canvas {
   
   <div id="hud">
     <div class="hud-item" id="scoreDisplay">分数: 0</div>
-    <div class="hud-item" id="waveDisplay">波次: 1</div>
+    <div class="hud-item" id="waveDisplay">第1关</div>
     <div class="hud-item" id="hpDisplay">❤️❤️❤️❤️❤️❤️❤️❤️</div>
+    <div class="hud-item" id="baseDisplay">🏠🏠🏠🏠🏠</div>
     <div class="hud-item" id="buffDisplay" style="font-size:14px;color:#ffd700;"></div>
   </div>
   
@@ -147,7 +148,8 @@ canvas {
       🧱 砖墙可以打碎 | 🛡️ 钢墙不可摧毁<br>
       💎 消灭敌人掉落道具，走过去拾取！<br>
       ❤️回血 ⚡加速 🔥火力 🛡️护盾 ⭐散弹<br>
-      击败所有敌人后进入Boss战！
+      🏠 保护好你的基地！基地被毁=游戏结束！
+      共20关，每5关一个Boss！加油！
     </div>
   </div>
   
@@ -306,7 +308,7 @@ class Obstacle {
 function generateObstacles(wave) {
   let obstacles = [];
   const W = canvas.width, H = canvas.height;
-  const playerSafeZone = { x: 450, y: 500, r: 100 };
+  const playerSafeZone = { x: 450, y: 460, r: 100 };
   
   // Helper: check if position overlaps with existing obstacles or player spawn
   function overlaps(ox, oy, ow, oh) {
@@ -531,8 +533,10 @@ class Enemy extends Tank {
       let dy = this.targetY - this.y;
       let dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 5) {
-        let nx = this.x + (dx/dist) * this.speed;
-        let ny = this.y + (dy/dist) * this.speed;
+        let spd = this.speed;
+        if (hasEnemyBuff(this, 'speed')) spd *= 1.5;
+        let nx = this.x + (dx/dist) * spd;
+        let ny = this.y + (dy/dist) * spd;
         // Boss ignores obstacles (it's big and powerful)
         this.x = nx;
         this.y = ny;
@@ -551,9 +555,10 @@ class Enemy extends Tank {
         this.moveTimer = 0;
       }
       
-      let nx = this.x + Math.cos(this.moveAngle) * this.speed;
-      let ny = this.y + Math.sin(this.moveAngle) * this.speed;
-      
+      let spd = this.speed;
+      if (hasEnemyBuff(this, 'speed')) spd *= 1.5;
+      let nx = this.x + Math.cos(this.moveAngle) * spd;
+      let ny = this.y + Math.sin(this.moveAngle) * spd;
       // Bounce off walls
       if (nx < 30 || nx > W - 30) this.moveAngle = Math.PI - this.moveAngle;
       if (ny < 30 || ny > H - 30) this.moveAngle = -this.moveAngle;
@@ -582,6 +587,7 @@ class Enemy extends Tank {
     let a = Math.atan2(player.y - this.y, player.x - this.x);
     let speed = this.type === 'boss' ? 3.5 : 2;
     let dmg = this.type === 'boss' ? 1 : 1;
+    if (hasEnemyBuff(this, 'fire')) dmg *= 2;
     game.enemyBullets.push({
       x: this.x + Math.cos(this.turretAngle) * 30,
       y: this.y + Math.sin(this.turretAngle) * 30,
@@ -589,20 +595,102 @@ class Enemy extends Tank {
       vy: Math.sin(a) * speed,
       r: this.type === 'boss' ? 5 : 3,
       dmg: dmg,
-      color: '#ff4444'
+      color: hasEnemyBuff(this, 'fire') ? '#ff8800' : '#ff4444'
     });
     
-    if (this.type === 'boss' && game.wave >= 3) {
+    // Boss spread or enemy with spread buff
+    if (this.type === 'boss' || hasEnemyBuff(this, 'spread')) {
+      let spreadAngle = this.type === 'boss' ? 0.3 : 0.25;
       for (let i = -1; i <= 1; i += 2) {
-        let sa = a + i * 0.3;
+        let sa = a + i * spreadAngle;
         game.enemyBullets.push({
           x: this.x + Math.cos(this.turretAngle) * 30,
           y: this.y + Math.sin(this.turretAngle) * 30,
           vx: Math.cos(sa) * speed,
           vy: Math.sin(sa) * speed,
-          r: 5, dmg: 1, color: '#ff4444'
+          r: this.type === 'boss' ? 5 : 3, dmg: dmg, color: hasEnemyBuff(this, 'fire') ? '#ff8800' : '#ff4444'
         });
       }
+    }
+  }
+}
+
+// Enemy buff system
+function hasEnemyBuff(enemy, buffId) {
+  return enemy.buffs && enemy.buffs[buffId] && enemy.buffs[buffId] > 0;
+}
+
+function applyEnemyPowerUp(enemy, pu) {
+  if (!enemy.buffs) enemy.buffs = {};
+  let id = pu.type.id;
+  game.pickupTexts.push({ text: '敌人获得 '+pu.type.icon+pu.type.label+'!', x: enemy.x, y: enemy.y - 30, timer: 60, color: '#ff4444' });
+  switch(id) {
+    case 'heal':
+      enemy.hp = Math.min(enemy.maxHp + 2, enemy.hp + 2);
+      break;
+    case 'speed':
+      enemy.buffs.speed = 480;
+      break;
+    case 'fire':
+      enemy.buffs.fire = 360;
+      break;
+    case 'shield':
+      enemy.buffs.shield = 300;
+      enemy.invincible = Math.max(enemy.invincible, 300);
+      break;
+    case 'spread':
+      enemy.buffs.spread = 420;
+      break;
+  }
+  spawnExplosion(pu.x, pu.y, '#ff4444', 8);
+}
+
+// ===== BASE (基地) =====
+const BASE_MAX_HP = 5;
+class Base {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.w = 44; this.h = 44;
+    this.hp = BASE_MAX_HP;
+    this.maxHp = BASE_MAX_HP;
+    this.alive = true;
+    this.flash = 0;
+  }
+  draw() {
+    if (!this.alive) return;
+    ctx.save();
+    // Glow based on HP
+    let hpRatio = this.hp / this.maxHp;
+    let glowColor = hpRatio > 0.6 ? 'rgba(0,255,100,0.15)' : hpRatio > 0.3 ? 'rgba(255,200,0,0.2)' : 'rgba(255,50,50,0.25)';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, 36 + Math.sin(Date.now()*0.003)*4, 0, Math.PI*2);
+    ctx.fillStyle = glowColor;
+    ctx.fill();
+    // Base body
+    let bc = this.flash > 0 ? '#fff' : (hpRatio > 0.6 ? '#2d8a4e' : hpRatio > 0.3 ? '#c8a200' : '#a03030');
+    ctx.fillStyle = bc;
+    ctx.fillRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+    // Border
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+    // Flag icon
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🏠', this.x, this.y);
+    if (this.flash > 0) this.flash--;
+    ctx.restore();
+  }
+  takeDamage(dmg) {
+    this.hp -= dmg;
+    this.flash = 8;
+    spawnExplosion(this.x, this.y, '#ffd700', 10);
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.alive = false;
+      spawnExplosion(this.x, this.y, '#ff4444', 40);
+      game.state = 'gameover';
     }
   }
 }
@@ -763,7 +851,7 @@ function startGame() {
   if (animId) cancelAnimationFrame(animId);
   
   game = {
-    player: new Tank(450, 500, '#4ecdc4', true),
+    player: new Tank(450, 460, '#4ecdc4', true),
     enemies: [],
     playerBullets: [],
     enemyBullets: [],
@@ -777,6 +865,7 @@ function startGame() {
     waveTimer: 0,
     bossSpawned: false,
     boss: null,
+    base: new Base(450, 565),
     state: 'playing',
     stars: []
   };
@@ -796,35 +885,81 @@ function startGame() {
 
 function spawnWave() {
   game.wave++;
+  if (game.wave > 20) {
+    game.state = 'victory';
+    return;
+  }
+  game.waveTimer = 180;
   
-  if (game.wave <= 3) {
-    // Normal waves
-    let count = game.wave * 2 + 1; // 3, 5, 7 enemies
+  let isBossLevel = game.wave % 5 === 0;
+  game.obstacles = generateObstacles(game.wave);
+  
+  if (isBossLevel) {
+    let bossCount = Math.min(Math.ceil(game.wave / 5), 3);
+    let bossHp = 25 + game.wave * 5;
+    let bossSpeed = 0.7 + game.wave * 0.02;
+    for (let i = 0; i < bossCount; i++) {
+      let bx = 150 + (i * 250) + Math.random() * 60;
+      if (bx > canvas.width - 80) bx = canvas.width - 80;
+      let boss = new Enemy(bx, 60 + Math.random() * 40, 'boss');
+      boss.hp = bossHp;
+      boss.maxHp = bossHp;
+      boss.radius = 28;
+      boss.baseSpeed = bossSpeed;
+      game.enemies.push(boss);
+      if (i === 0) { game.boss = boss; game.bossSpawned = true; }
+    }
+    // Minions
+    let minionCount = Math.floor(game.wave / 5) + 1;
+    for (let i = 0; i < minionCount; i++) {
+      let mx = 50 + Math.random() * 800;
+      let m = new Enemy(mx, 30 + Math.random() * 30, 'normal');
+      m.hp = 1 + Math.floor(game.wave / 4);
+      m.maxHp = m.hp;
+      m.baseSpeed = 0.8 + game.wave * 0.03;
+      game.enemies.push(m);
+    }
+    document.getElementById('bossBar').style.display = 'block';
+    game.pickupTexts.push({ text: '⚠️ BOSS关卡！', x: 450, y: 280, timer: 120, color: '#ff4444' });
+  } else {
+    let count = 2 + game.wave;
+    let hp = 1 + Math.floor(game.wave / 3);
+    let spd = 0.7 + game.wave * 0.04;
     for (let i = 0; i < count; i++) {
-      let ex, ey;
+      let x, y;
       do {
-        ex = 80 + Math.random() * (canvas.width - 160);
-        ey = 50 + Math.random() * 200;
-      } while (Math.hypot(ex - game.player.x, ey - game.player.y) < 150);
+        x = 80 + Math.random() * (canvas.width - 160);
+        y = 30 + Math.random() * 80;
+      } while (Math.hypot(x - game.player.x, y - game.player.y) < 150);
       
-      let e = new Enemy(ex, ey, 'normal');
+      let types = ['normal'];
+      if (game.wave >= 6) types.push('fast');
+      if (game.wave >= 11) types.push('heavy');
+      let t = types[Math.floor(Math.random() * types.length)];
+      let e = new Enemy(x, y, t);
+      e.hp = hp;
+      e.maxHp = hp;
+      if (t === 'fast') { e.baseSpeed = spd * 1.5; e.hp = Math.max(1, hp - 1); e.maxHp = e.hp; }
+      if (t === 'heavy') { e.baseSpeed = spd * 0.6; e.hp = hp * 2; e.maxHp = e.hp; }
       game.enemies.push(e);
     }
-    // Generate obstacles for this wave (fresh layout each wave)
-    game.obstacles = generateObstacles(game.wave);
-  } else {
-    // Boss wave - clear obstacles for epic fight
-    game.obstacles = [];
-    let boss = new Enemy(canvas.width / 2, 150, 'boss');
-    boss.hp = 50;
-    boss.maxHp = 50;
-    game.boss = boss;
-    game.enemies.push(boss);
-    game.bossSpawned = true;
-    document.getElementById('bossBar').style.display = 'block';
   }
   
-  document.getElementById('waveDisplay').textContent = '波次: ' + game.wave;
+  // Base protection walls (brick fortress)
+  let bx = game.base.x, by = game.base.y;
+  // Top wall
+  game.obstacles.push(new Obstacle(bx - 22, by - 32, 'brick'));
+  game.obstacles.push(new Obstacle(bx, by - 32, 'brick'));
+  game.obstacles.push(new Obstacle(bx + 22, by - 32, 'brick'));
+  // Left wall
+  game.obstacles.push(new Obstacle(bx - 32, by, 'brick'));
+  // Right wall
+  game.obstacles.push(new Obstacle(bx + 32, by, 'brick'));
+  
+  document.getElementById('waveDisplay').textContent = '第' + game.wave + '关';
+  if (game.wave > 1) {
+    game.pickupTexts.push({ text: '第' + game.wave + '关开始！', x: 450, y: 280, timer: 90, color: '#ffd700' });
+  }
 }
 
 function playerShoot() {
@@ -868,13 +1003,22 @@ function updateHUD() {
   document.getElementById('hpDisplay').textContent = hearts;
   document.getElementById('scoreDisplay').textContent = '分数: ' + game.score;
   
+  // Base HP display
+  if (game.base) {
+    let baseStr = '';
+    for (let i = 0; i < game.base.maxHp; i++) {
+      baseStr += i < game.base.hp ? '🏠' : '🏚️';
+    }
+    document.getElementById('baseDisplay').textContent = baseStr;
+  }
+  
+  let buffStr = '';
   if (game.boss && game.boss.alive) {
     let pct = Math.max(0, game.boss.hp / game.boss.maxHp * 100);
     document.getElementById('bossBarInner').style.width = pct + '%';
   }
   
   // Buff display
-  let buffStr = '';
   if (game.buffs) {
     if (hasBuff('speed'))  buffStr += '⚡' + Math.ceil(game.buffs.speed/60) + 's ';
     if (hasBuff('fire'))   buffStr += '🔥' + Math.ceil(game.buffs.fire/60) + 's ';
@@ -1030,6 +1174,54 @@ function gameLoop() {
     }
   });
   
+  // Check enemy pickup powerups (enemies can steal them!)
+  game.powerups.forEach(pu => {
+    if (!pu.alive) return;
+    game.enemies.forEach(e => {
+      if (!e.alive) return;
+      let dist = Math.hypot(pu.x - e.x, pu.y - e.y);
+      if (dist < 30) {
+        pu.alive = false;
+        applyEnemyPowerUp(e, pu);
+      }
+    });
+  });
+  
+  // Update enemy buff timers
+  game.enemies.forEach(e => {
+    if (!e.alive || !e.buffs) return;
+    for (let key in e.buffs) {
+      if (e.buffs[key] > 0) e.buffs[key]--;
+      if (e.buffs[key] <= 0) {
+        if (key === 'shield') e.invincible = Math.max(0, e.invincible - 1);
+      }
+    }
+  });
+  
+  // Enemy bullets hit base
+  if (game.base && game.base.alive) {
+    game.enemyBullets.forEach(b => {
+      if (!b.alive) return;
+      let dx = b.x - game.base.x;
+      let dy = b.y - game.base.y;
+      if (Math.abs(dx) < game.base.w/2 && Math.abs(dy) < game.base.h/2) {
+        b.alive = false;
+        game.base.takeDamage(b.dmg || 1);
+      }
+    });
+    // Enemies physically reaching base = damage
+    game.enemies.forEach(e => {
+      if (!e.alive) return;
+      let dist = Math.hypot(e.x - game.base.x, e.y - game.base.y);
+      if (dist < 30) {
+        game.base.takeDamage(1);
+        e.alive = false;
+        spawnExplosion(e.x, e.y, '#ff4444', 15);
+        game.score += 50;
+      }
+    });
+  }
+  
   // Update buff timers
   if (game.buffs) {
     for (let key in game.buffs) {
@@ -1055,12 +1247,17 @@ function gameLoop() {
   // Check wave clear
   let aliveEnemies = game.enemies.filter(e => e.alive);
   if (aliveEnemies.length === 0 && game.state === 'playing') {
-    if (game.bossSpawned) {
-      game.state = 'win';
+    if (game.wave >= 20) {
+      game.state = 'victory';
     } else {
       game.waveTimer++;
       if (game.waveTimer > 60) {
         game.waveTimer = 0;
+        if (game.wave % 5 === 0) {
+          document.getElementById('bossBar').style.display = 'none';
+          game.bossSpawned = false;
+          game.boss = null;
+        }
         spawnWave();
       }
     }
@@ -1113,7 +1310,29 @@ function gameLoop() {
   
   // Draw tanks
   game.player.draw();
-  game.enemies.forEach(e => e.draw());
+  game.enemies.forEach(e => {
+    e.draw();
+    // Enemy buff visual indicator
+    if (e.alive && e.buffs) {
+      let buffColors = [];
+      if (e.buffs.speed > 0) buffColors.push('#ffff00');
+      if (e.buffs.fire > 0) buffColors.push('#ff6600');
+      if (e.buffs.shield > 0) buffColors.push('#44aaff');
+      if (e.buffs.spread > 0) buffColors.push('#ff00ff');
+      if (buffColors.length > 0) {
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.radius + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = buffColors[0];
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.5 + Math.sin(Date.now() * 0.008) * 0.3;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+  });
+  
+  // Draw base
+  if (game.base && game.base.alive) game.base.draw();
   
   // Draw shield aura on player
   if (hasBuff('shield')) {
@@ -1151,18 +1370,18 @@ function gameLoop() {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 36px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('波次清除！准备下一波...', W/2, H/2);
+    ctx.fillText('第' + game.wave + '关通过！准备下一关...', W/2, H/2);
   }
   
   updateHUD();
   
   if (game.state === 'gameover') {
-    document.getElementById('finalScore').textContent = '最终分数: ' + game.score;
+    document.getElementById('finalScore').textContent = '最终分数: ' + game.score + ' (打到第' + game.wave + '关)';
     document.getElementById('gameOverScreen').style.display = 'flex';
     return;
   }
-  if (game.state === 'win') {
-    document.getElementById('winScore').textContent = '最终分数: ' + game.score;
+  if (game.state === 'victory' || game.state === 'win') {
+    document.getElementById('winScore').textContent = '最终分数: ' + game.score + ' 🏆通关20关！';
     document.getElementById('winScreen').style.display = 'flex';
     return;
   }
