@@ -600,7 +600,7 @@ class Enemy extends Tank {
         y: this.y + Math.sin(this.turretAngle) * 30,
         vx: Math.cos(sa) * speed,
         vy: Math.sin(sa) * speed,
-        r: bulletR, dmg: dmg, color: bulletColor
+        r: bulletR, dmg: dmg, color: bulletColor, alive: true
       });
     }
     
@@ -613,7 +613,7 @@ class Enemy extends Tank {
           y: this.y + Math.sin(this.turretAngle) * 30,
           vx: Math.cos(sa) * speed,
           vy: Math.sin(sa) * speed,
-          r: bulletR, dmg: dmg, color: bulletColor
+          r: bulletR, dmg: dmg, color: bulletColor, alive: true
         });
       }
     }
